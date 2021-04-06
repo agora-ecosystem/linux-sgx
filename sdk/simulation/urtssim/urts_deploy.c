@@ -76,6 +76,11 @@ sgx_status_t pthread_create_ocall()
     printf("Please use the correct uRTS library from PSW package.\n");
     return SGX_ERROR_UNEXPECTED;
 }
+sgx_status_t pthread_create_cpuidx_ocall()
+{
+    printf("Please use the correct uRTS library from PSW package.\n");
+    return SGX_ERROR_UNEXPECTED;
+}
 sgx_status_t pthread_wait_timeout_ocall()
 {
     printf("Please use the correct uRTS library from PSW package.\n");

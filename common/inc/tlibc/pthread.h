@@ -79,6 +79,8 @@ extern "C" {
 /* Create & exit */
 int SGXAPI pthread_create(pthread_t *, const pthread_attr_t *attr,
                    void *(*start_routine)(void *), void *);
+int SGXAPI pthread_create_cpuidx(pthread_t *, const pthread_attr_t *attr, int cpu_idx,
+                    void *(*start_routine)(void *), void *);
 void SGXAPI pthread_exit(void *);
 int SGXAPI pthread_join(pthread_t, void **);
 

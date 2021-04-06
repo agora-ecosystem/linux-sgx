@@ -40,6 +40,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include "get_thread_id.h"
+#include "sched.h"
 
 static void* pthread_create_routine(void* arg)
 {
@@ -95,6 +96,46 @@ extern "C" sgx_status_t pthread_create_ocall(unsigned long long self)
 
     pthread_t thread;
     int ret = pthread_create(&thread, &attr, pthread_create_routine, (void *)(trust_thread));  
+    if(ret != 0)
+    {
+        //Add back the tcs to free queue directly, because the tcs hasn't been binded with the new thread yet.
+        enclave->get_thread_pool()->add_to_free_thread_vector(trust_thread);
+        return SGX_ERROR_UNEXPECTED;
+    }
+
+    return SGX_SUCCESS;
+}
+
+/*
+ * ocall used to create an separate thread with a specific cpu affinity
+ * tcs: tcs
+*/
+extern "C" sgx_status_t pthread_create_cpuidx_ocall(unsigned long long self, int cpu_idx)
+{
+//    (void) cpu_idx;
+    CEnclave *enclave = CEnclavePool::instance()->get_enclave_with_tcs((void*)self);
+    if(NULL == enclave)
+        return SGX_ERROR_INVALID_PARAMETER;
+
+    CTrustThread *trust_thread = enclave->get_free_tcs();
+    if(NULL == trust_thread)
+        return SGX_ERROR_OUT_OF_TCS;
+
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(cpu_idx, &set);
+    pthread_attr_t attr;
+    if(pthread_attr_init(&attr) != 0)
+        return SGX_ERROR_UNEXPECTED;
+    //Set the new thread as "PTHREAD_CREATE_DETACHED", it will optimize SGX pthread_create performance.
+    if(pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED) != 0)
+        return SGX_ERROR_UNEXPECTED;
+
+    //Set thread affinity
+    pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &set);
+
+    pthread_t thread;
+    int ret = pthread_create(&thread, &attr, pthread_create_routine, (void *)(trust_thread));
     if(ret != 0)
     {
         //Add back the tcs to free queue directly, because the tcs hasn't been binded with the new thread yet.

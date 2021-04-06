@@ -281,6 +281,96 @@ pthread_create_error:
 }
 
 /*
+ *: function: create a new thread
+ *  limitation: Currently the "attr" is unused inside SGX pthread_create(). And the thread is created with "PTHREAD_CREATE_JOINABLE" attribute.
+ *                      So user need to call pthread_join() to free pthread_create() created thread's resource.
+ */
+int pthread_create_cpuidx(pthread_t *threadp, const pthread_attr_t *attr, int cpu_idx,
+                   void *(*start_routine)(void *), void *arg)
+{
+    (void) cpu_idx;
+
+    if (threadp == NULL)
+        return EINVAL;
+    if (start_routine == NULL ||!sgx_is_within_enclave((void *)start_routine, sizeof(void*)))
+        return EINVAL;
+    if (arg != NULL && !sgx_is_within_enclave((void *)arg, sizeof(void *)))
+        return EINVAL;
+    UNUSED(attr);
+
+    pthread_t thread = (pthread_t )malloc(sizeof(pthread));
+    if(NULL == thread) {
+        *threadp = NULL;
+        return ENOMEM;
+    }
+    //inital thread structure
+    thread->lock = SGX_SPINLOCK_INITIALIZER;
+    thread->tid = NULL;
+    thread->retval = NULL;
+    thread->joiner_td = WAITER_TD_NULL;   /* clear the waiter's TD, the  joiner_td value is dynamic according to the joiner thread*/
+    thread->creater_td = (sgx_thread_t)get_thread_data();
+    thread->state = _STATE_PREPARING;
+    thread->start_routine = start_routine;   //Hook the func
+    thread->arg = arg;
+    SGX_THREAD_QUEUE_INSERT_TAIL(&g_work_queue, &thread->common_queue_elm, &g_work_queue_lock);
+
+    int retValue = EINVAL;
+    sgx_status_t ret = SGX_ERROR_UNEXPECTED;
+    pthread_create_cpuidx_ocall((int*)&ret, (unsigned long long)TD2TCS((sgx_thread_t)get_thread_data()), cpu_idx);
+    if(SGX_SUCCESS != ret) {
+        //ERROR
+        //Delete an element from the header of the work queue
+        volatile sgx_pthread_common_queue_elm_t *elm = NULL;
+        SGX_THREAD_QUEUE_GET_HEADER(&g_work_queue, elm, &g_work_queue_lock);
+        if(NULL != elm) {
+            pthread_t target_thread = container_of(elm, pthread, common_queue_elm);
+            if(pthread_equal(target_thread, thread)) {
+                retValue = (SGX_ERROR_OUT_OF_TCS == ret) ? EAGAIN : EINVAL;
+                goto pthread_create_error;
+            }else {
+                //Notify the remote thread/local thread that need exit with an ERROR code.
+                sgx_spin_lock(&target_thread->lock);
+                target_thread->state = (SGX_ERROR_OUT_OF_TCS == ret) ? _STATE_ERROR_OUT_OF_TCS : _STATE_ERROR_UNEXPECTED;
+                sgx_spin_unlock(&target_thread->lock);
+                _pthread_wakeup(target_thread->creater_td);
+            }
+        }
+    }
+
+    //Wait until the "start_routine" has been executed by new created thread.
+    while(1) {
+        if(_pthread_wait_timeout(thread->creater_td, PTHREAD_WAIT_TIMEOUT_SECONDS) != 0) {
+            retValue = EINVAL;
+            goto pthread_create_error;
+        }
+
+        sgx_spin_lock(&thread->lock);
+        if(_STATE_PREPARING != thread->state) {
+            sgx_spin_unlock(&thread->lock);
+            if(thread->state == _STATE_ERROR_OUT_OF_TCS ||thread->state == _STATE_ERROR_UNEXPECTED ) {
+                //ERROR
+                retValue = (_STATE_ERROR_OUT_OF_TCS == thread->state) ? EAGAIN : EINVAL;
+                goto pthread_create_error;
+            }
+            //SUCCESS
+            break;
+        }
+        sgx_spin_unlock(&thread->lock);
+
+    }
+
+    //SUCCESS
+    *threadp = thread;
+    return 0;
+
+    pthread_create_error:
+    *threadp = NULL;
+    free(thread);
+    return retValue;
+}
+
+
+/*
  *: terminate calling thread
  */
 __attribute__((noreturn)) void pthread_exit(void *retval)

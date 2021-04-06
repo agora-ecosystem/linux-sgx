@@ -33,6 +33,7 @@ enclave {
     untrusted {
         [cdecl] int pthread_wait_timeout_ocall (unsigned long long waiter, unsigned long long timeout);
         [cdecl] int pthread_create_ocall(unsigned long long self);
+        [cdecl] int pthread_create_cpuidx_ocall(unsigned long long self, int cpu_idx);
         [cdecl] int pthread_wakeup_ocall(unsigned long long waiter);
     };
 };

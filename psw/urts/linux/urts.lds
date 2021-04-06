@@ -10,6 +10,7 @@
         sgx_thread_setwait_untrusted_events_ocall;
         sgx_thread_set_multiple_untrusted_events_ocall;
         pthread_create_ocall;
+        pthread_create_cpuidx_ocall;
         pthread_wait_timeout_ocall;
         pthread_wakeup_ocall;
         sgx_oc_cpuidex;
